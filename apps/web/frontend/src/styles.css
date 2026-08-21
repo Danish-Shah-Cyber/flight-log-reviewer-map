@@ -1,0 +1,44 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fb;
+  color: #18202b;
+  font: 15px/1.5 Inter, Segoe UI, Arial, sans-serif;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.review-surface {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+header p {
+  margin: 0 0 8px;
+  color: #657184;
+}
+
+h1 {
+  margin: 0 0 20px;
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.feature {
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+}

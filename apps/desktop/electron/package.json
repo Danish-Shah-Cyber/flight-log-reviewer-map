@@ -1,0 +1,17 @@
+{
+  "name": "flight-log-reviewer-pro-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "package": "electron-builder"
+  },
+  "dependencies": {
+    "electron": "^37.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.0"
+  }
+}
