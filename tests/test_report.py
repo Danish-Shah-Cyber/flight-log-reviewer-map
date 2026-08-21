@@ -25,6 +25,20 @@ class ReportTests(unittest.TestCase):
         self.assertIn("plot-zoom-out", document)
         self.assertIn("plot-readout", document)
 
+    def test_report_includes_2d_and_cesium_route_maps(self):
+        samples = generate_flight(duration_s=80)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = Path(temp_dir) / "report.html"
+            write_html_report(report, samples, analyze(samples), generate_insights(samples))
+            document = report.read_text(encoding="utf-8")
+
+        self.assertIn("2D Map", document)
+        self.assertIn("Cesium 3D", document)
+        self.assertIn("leaflet-route-map", document)
+        self.assertIn("cesium-route-map", document)
+        self.assertIn("routePopupHtml", document)
+        self.assertIn("OpenStreetMapImageryProvider", document)
+
     def test_report_notes_downsampled_display(self):
         samples = generate_flight(duration_s=12100)
         with tempfile.TemporaryDirectory() as temp_dir:

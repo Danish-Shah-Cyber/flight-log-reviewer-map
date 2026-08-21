@@ -182,19 +182,34 @@ def _route_map(samples: list[FlightSample]) -> str:
       <div><span class="muted">End</span><strong>{html.escape(_format_position(end_sample))}</strong></div>
       <div><span class="muted">GPS points</span><strong>{len(route_samples)}</strong></div>
     </div>
-    <svg class="route-map" viewBox="0 0 {width} {height}" role="img" aria-label="Drone route map">
-      <rect x="1" y="1" width="{width - 2}" height="{height - 2}" rx="8" class="map-bg"/>
-      <g class="grid-lines">
-        <line x1="180" y1="0" x2="180" y2="{height}"/><line x1="360" y1="0" x2="360" y2="{height}"/>
-        <line x1="540" y1="0" x2="540" y2="{height}"/><line x1="720" y1="0" x2="720" y2="{height}"/>
-        <line x1="0" y1="90" x2="{width}" y2="90"/><line x1="0" y1="180" x2="{width}" y2="180"/>
-        <line x1="0" y1="270" x2="{width}" y2="270"/>
-      </g>
-      <g class="route-path">{"".join(paths)}</g>
-      <g class="route-dots">{sample_dots}</g>
-      <circle cx="{start_x:.1f}" cy="{start_y:.1f}" r="6" class="start-marker"/><text x="{start_x + 9:.1f}" y="{start_y - 9:.1f}">Start</text>
-      <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="6" class="end-marker"/><text x="{end_x + 9:.1f}" y="{end_y - 9:.1f}">End</text>
-    </svg>
+    <div class="route-tabs" role="tablist" aria-label="Route map views">
+      <button class="route-tab active" type="button" data-route-view="route-2d">2D Map</button>
+      <button class="route-tab" type="button" data-route-view="route-3d">Cesium 3D</button>
+      <button class="route-tab" type="button" data-route-view="route-svg">Path</button>
+    </div>
+    <div class="route-view active" data-route-panel="route-2d">
+      <div class="leaflet-route-map" aria-label="2D drone route map"></div>
+      <div class="map-empty muted">2D map library unavailable. Use the Path tab while offline.</div>
+    </div>
+    <div class="route-view" data-route-panel="route-3d">
+      <div class="cesium-route-map" aria-label="Cesium 3D drone route map"></div>
+      <div class="map-empty muted">Cesium 3D map library unavailable. Use the Path tab while offline.</div>
+    </div>
+    <div class="route-view" data-route-panel="route-svg">
+      <svg class="route-map" viewBox="0 0 {width} {height}" role="img" aria-label="Drone route path">
+        <rect x="1" y="1" width="{width - 2}" height="{height - 2}" rx="8" class="map-bg"/>
+        <g class="grid-lines">
+          <line x1="180" y1="0" x2="180" y2="{height}"/><line x1="360" y1="0" x2="360" y2="{height}"/>
+          <line x1="540" y1="0" x2="540" y2="{height}"/><line x1="720" y1="0" x2="720" y2="{height}"/>
+          <line x1="0" y1="90" x2="{width}" y2="90"/><line x1="0" y1="180" x2="{width}" y2="180"/>
+          <line x1="0" y1="270" x2="{width}" y2="270"/>
+        </g>
+        <g class="route-path">{"".join(paths)}</g>
+        <g class="route-dots">{sample_dots}</g>
+        <circle cx="{start_x:.1f}" cy="{start_y:.1f}" r="6" class="start-marker"/><text x="{start_x + 9:.1f}" y="{start_y - 9:.1f}">Start</text>
+        <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="6" class="end-marker"/><text x="{end_x + 9:.1f}" y="{end_y - 9:.1f}">End</text>
+      </svg>
+    </div>
     <div class="route-legend">{mode_labels}</div>"""
 
 
@@ -458,7 +473,10 @@ def write_html_report(
     )
     document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Flight Data Dashboard</title><style>
+<title>Flight Data Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.121.1/Build/Cesium/Widgets/widgets.css">
+<style>
 :root {{
   color-scheme: light;
   --bg: #f5f7fb; --panel: #ffffff; --panel-2: #eef2f7; --text: #18202b; --muted: #657184;
@@ -521,6 +539,17 @@ polyline {{ fill: none; stroke-width: 3; stroke-linejoin: round; }}
 .route-meta {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }}
 .route-meta div {{ background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 11px; min-width: 0; }}
 .route-meta strong {{ display: block; margin-top: 4px; overflow-wrap: anywhere; }}
+.route-tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }}
+.route-tab {{ border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 8px; cursor: pointer; padding: 8px 11px; }}
+.route-tab.active {{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }}
+.route-view {{ display: none; position: relative; }}
+.route-view.active {{ display: block; }}
+.leaflet-route-map, .cesium-route-map {{ width: 100%; height: clamp(360px, 48vh, 620px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }}
+.map-empty {{ display: none; border: 1px dashed var(--line); border-radius: 8px; padding: 14px; margin-top: 10px; }}
+.route-view.map-failed .map-empty {{ display: block; }}
+.leaflet-popup-content {{ color: #18202b; min-width: 210px; }}
+.leaflet-popup-content strong {{ display: block; margin-bottom: 4px; }}
+.cesium-route-map .cesium-widget-credits {{ display: none !important; }}
 .route-map text {{ fill: var(--text); font-size: 14px; font-weight: 700; }}
 .map-bg {{ fill: var(--panel-2); stroke: none; }}
 .grid-lines line {{ stroke: var(--line); stroke-width: 1; }}
@@ -583,16 +612,24 @@ ul {{ padding-left: 20px; }}
   </main>
 </div>
 {templates}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.121.1/Build/Cesium/Cesium.js"></script>
 <script>
 const defaultModules = {default_json};
 const flightSamples = {sample_json};
 const flightColumns = {column_json};
+const routeSamples = flightSamples.filter(row => {{
+  const lat = Number(row.latitude_deg);
+  const lon = Number(row.longitude_deg);
+  return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && !(lat === 0 && lon === 0);
+}});
 const workspace = document.getElementById("workspace");
 const storageKey = "flight-dashboard-layout";
 const themeKey = "flight-dashboard-theme";
 let draggedModule = null;
 const svgNS = "http://www.w3.org/2000/svg";
 const plotState = new WeakMap();
+const routeMapState = new WeakMap();
 
 function formatTime(seconds) {{
   const safe = Math.max(0, Number(seconds) || 0);
@@ -731,6 +768,173 @@ function formatValue(value) {{
   return String(value);
 }}
 
+function routePopupHtml(point) {{
+  return "<strong>" + formatTime(point.time_s) + "</strong>" +
+    "<div>Mode: " + escapeCell(point.mode || "Unknown") + "</div>" +
+    "<div>Armed: " + (point.armed ? "Yes" : "No") + "</div>" +
+    "<div>Altitude: " + formatValue(point.relative_altitude_m) + " m</div>" +
+    "<div>Speed: " + formatValue(point.groundspeed_m_s) + " m/s</div>" +
+    "<div>Location: " + formatValue(point.latitude_deg) + ", " + formatValue(point.longitude_deg) + "</div>";
+}}
+
+function nearestRoutePoint(lat, lon) {{
+  let nearest = null;
+  let best = Infinity;
+  routeSamples.forEach(point => {{
+    const dLat = Number(point.latitude_deg) - lat;
+    const dLon = Number(point.longitude_deg) - lon;
+    const score = dLat * dLat + dLon * dLon;
+    if (score < best) {{
+      best = score;
+      nearest = point;
+    }}
+  }});
+  return nearest;
+}}
+
+function routeColorForMode(mode) {{
+  const palette = ["#1769c2", "#0f8f72", "#b36b00", "#7357c8", "#bf3145", "#0b8f8f"];
+  const modes = [...new Set(routeSamples.map(point => point.mode || "Unknown"))];
+  return palette[Math.max(0, modes.indexOf(mode || "Unknown")) % palette.length];
+}}
+
+function initLeafletRoute(moduleNode) {{
+  const panel = moduleNode.querySelector('[data-route-panel="route-2d"]');
+  const container = moduleNode.querySelector(".leaflet-route-map");
+  if (!panel || !container || routeMapState.get(container)) return;
+  if (!window.L || routeSamples.length < 2) {{
+    panel.classList.add("map-failed");
+    return;
+  }}
+  const points = routeSamples.map(point => [Number(point.latitude_deg), Number(point.longitude_deg)]);
+  const map = L.map(container, {{ scrollWheelZoom: true }});
+  L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 20
+  }}).addTo(map);
+  let segment = [points[0]];
+  let mode = routeSamples[0].mode || "Unknown";
+  routeSamples.slice(1).forEach((point, index) => {{
+    const nextMode = point.mode || "Unknown";
+    segment.push(points[index + 1]);
+    if (nextMode !== mode || index === routeSamples.length - 2) {{
+      L.polyline(segment, {{ color: routeColorForMode(mode), weight: 5, opacity: 0.9 }}).addTo(map);
+      segment = [points[index + 1]];
+      mode = nextMode;
+    }}
+  }});
+  const hoverMarker = L.circleMarker(points[0], {{ radius: 6, color: "#ffffff", weight: 2, fillColor: "#1769c2", fillOpacity: 1 }}).addTo(map);
+  map.on("mousemove", event => {{
+    const point = nearestRoutePoint(event.latlng.lat, event.latlng.lng);
+    if (!point) return;
+    const latlng = [Number(point.latitude_deg), Number(point.longitude_deg)];
+    hoverMarker.setLatLng(latlng);
+    hoverMarker.bindTooltip(routePopupHtml(point), {{ sticky: true, direction: "top", opacity: 0.96 }}).openTooltip();
+  }});
+  L.marker(points[0]).addTo(map).bindPopup("Start<br>" + routePopupHtml(routeSamples[0]));
+  L.marker(points[points.length - 1]).addTo(map).bindPopup("End<br>" + routePopupHtml(routeSamples[routeSamples.length - 1]));
+  map.fitBounds(points, {{ padding: [28, 28] }});
+  routeMapState.set(container, map);
+}}
+
+function initCesiumRoute(moduleNode) {{
+  const panel = moduleNode.querySelector('[data-route-panel="route-3d"]');
+  const container = moduleNode.querySelector(".cesium-route-map");
+  if (!panel || !container || routeMapState.get(container)) return;
+  if (!window.Cesium || routeSamples.length < 2) {{
+    panel.classList.add("map-failed");
+    return;
+  }}
+  Cesium.Ion.defaultAccessToken = "";
+  const viewer = new Cesium.Viewer(container, {{
+    animation: false,
+    baseLayerPicker: false,
+    fullscreenButton: false,
+    geocoder: false,
+    homeButton: true,
+    infoBox: false,
+    sceneModePicker: true,
+    selectionIndicator: false,
+    timeline: false,
+    navigationHelpButton: false,
+    imageryProvider: new Cesium.OpenStreetMapImageryProvider({{ url: "https://a.tile.openstreetmap.org/" }}),
+    terrainProvider: new Cesium.EllipsoidTerrainProvider()
+  }});
+  const positions = routeSamples.map(point => Cesium.Cartesian3.fromDegrees(
+    Number(point.longitude_deg),
+    Number(point.latitude_deg),
+    Math.max(1, Number(point.relative_altitude_m) || 1)
+  ));
+  viewer.entities.add({{
+    name: "Drone route",
+    polyline: {{
+      positions,
+      width: 5,
+      material: new Cesium.PolylineGlowMaterialProperty({{
+        glowPower: 0.18,
+        color: Cesium.Color.fromCssColorString("#1769c2")
+      }})
+    }}
+  }});
+  viewer.entities.add({{
+    name: "Start",
+    position: positions[0],
+    point: {{ pixelSize: 11, color: Cesium.Color.fromCssColorString("#0f8f72"), outlineColor: Cesium.Color.WHITE, outlineWidth: 2 }},
+    label: {{ text: "Start", font: "14px sans-serif", pixelOffset: new Cesium.Cartesian2(0, -22), fillColor: Cesium.Color.WHITE }}
+  }});
+  viewer.entities.add({{
+    name: "End",
+    position: positions[positions.length - 1],
+    point: {{ pixelSize: 11, color: Cesium.Color.fromCssColorString("#bf3145"), outlineColor: Cesium.Color.WHITE, outlineWidth: 2 }},
+    label: {{ text: "End", font: "14px sans-serif", pixelOffset: new Cesium.Cartesian2(0, -22), fillColor: Cesium.Color.WHITE }}
+  }});
+  const hoverEntity = viewer.entities.add({{
+    name: "Point details",
+    position: positions[0],
+    point: {{ pixelSize: 10, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 }},
+    label: {{ text: "", font: "13px sans-serif", showBackground: true, backgroundColor: Cesium.Color.BLACK.withAlpha(0.72), pixelOffset: new Cesium.Cartesian2(0, -32), fillColor: Cesium.Color.WHITE }}
+  }});
+  const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  handler.setInputAction(movement => {{
+    const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, viewer.scene.globe.ellipsoid);
+    if (!cartesian) return;
+    const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+    const point = nearestRoutePoint(Cesium.Math.toDegrees(cartographic.latitude), Cesium.Math.toDegrees(cartographic.longitude));
+    if (!point) return;
+    hoverEntity.position = Cesium.Cartesian3.fromDegrees(Number(point.longitude_deg), Number(point.latitude_deg), Math.max(1, Number(point.relative_altitude_m) || 1));
+    hoverEntity.label.text = formatTime(point.time_s) + "\\n" +
+      "Mode: " + (point.mode || "Unknown") + "\\n" +
+      "Alt: " + formatValue(point.relative_altitude_m) + " m | Speed: " + formatValue(point.groundspeed_m_s) + " m/s";
+  }}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+  viewer.zoomTo(viewer.entities);
+  routeMapState.set(container, viewer);
+}}
+
+function initRouteMaps(root = document) {{
+  root.querySelectorAll(".route-tabs").forEach(tabs => {{
+    if (tabs.dataset.ready) return;
+    tabs.dataset.ready = "true";
+    const moduleNode = tabs.closest(".module");
+    tabs.querySelectorAll(".route-tab").forEach(button => {{
+      button.addEventListener("click", () => {{
+        tabs.querySelectorAll(".route-tab").forEach(item => item.classList.toggle("active", item === button));
+        moduleNode.querySelectorAll(".route-view").forEach(panel => panel.classList.toggle("active", panel.dataset.routePanel === button.dataset.routeView));
+        if (button.dataset.routeView === "route-2d") {{
+          initLeafletRoute(moduleNode);
+          const map = routeMapState.get(moduleNode.querySelector(".leaflet-route-map"));
+          if (map && map.invalidateSize) setTimeout(() => map.invalidateSize(), 20);
+        }}
+        if (button.dataset.routeView === "route-3d") {{
+          initCesiumRoute(moduleNode);
+          const viewer = routeMapState.get(moduleNode.querySelector(".cesium-route-map"));
+          if (viewer && viewer.resize) setTimeout(() => viewer.resize(), 20);
+        }}
+      }});
+    }});
+    initLeafletRoute(moduleNode);
+  }});
+}}
+
 function escapeCell(value) {{
   return formatValue(value).replace(/[&<>"']/g, character => ({{
     "&": "&amp;",
@@ -813,6 +1017,7 @@ function createModule(id) {{
   }});
   if (id === "data") initDataExplorer(node);
   initPlots(node);
+  if (id === "map") initRouteMaps(node);
   return node;
 }}
 
