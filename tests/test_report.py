@@ -65,6 +65,10 @@ class ReportTests(unittest.TestCase):
         self.assertIn("loadScriptWithFallback", document)
         self.assertIn("UrlTemplateImageryProvider", document)
         self.assertIn("loadMapLibraries", document)
+        self.assertIn('L.polyline(points, { color: "#111827"', document)
+        self.assertIn('L.polyline(points, { color: "#19b7ff"', document)
+        self.assertIn("altitudeScale", document)
+        self.assertIn("viewer.camera.setView", document)
 
     def test_report_notes_downsampled_display(self):
         samples = generate_flight(duration_s=12100)

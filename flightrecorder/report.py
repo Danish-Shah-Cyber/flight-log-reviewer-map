@@ -1322,21 +1322,34 @@ function initLeafletRoute(moduleNode) {{
     return;
   }}
   const points = routeSamples.map(point => [Number(point.latitude_deg), Number(point.longitude_deg)]);
-  const map = L.map(container, {{ scrollWheelZoom: true }});
+  const map = L.map(container, {{ scrollWheelZoom: true, preferCanvas: true }});
   L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
     attribution: "&copy; OpenStreetMap contributors",
     maxZoom: 20
   }}).addTo(map);
+  L.polyline(points, {{ color: "#111827", weight: 10, opacity: 0.72, lineCap: "round", lineJoin: "round" }}).addTo(map);
+  L.polyline(points, {{ color: "#19b7ff", weight: 5, opacity: 1, lineCap: "round", lineJoin: "round" }}).addTo(map);
   let segment = [points[0]];
   let mode = routeSamples[0].mode || "Unknown";
   routeSamples.slice(1).forEach((point, index) => {{
     const nextMode = point.mode || "Unknown";
     segment.push(points[index + 1]);
     if (nextMode !== mode || index === routeSamples.length - 2) {{
-      L.polyline(segment, {{ color: routeColorForMode(mode), weight: 5, opacity: 0.9 }}).addTo(map);
+      L.polyline(segment, {{ color: routeColorForMode(mode), weight: 7, opacity: 0.95, lineCap: "round", lineJoin: "round" }}).addTo(map);
       segment = [points[index + 1]];
       mode = nextMode;
     }}
+  }});
+  const markerStep = Math.max(1, Math.ceil(points.length / 36));
+  points.forEach((latlng, index) => {{
+    if (index % markerStep !== 0 && index !== points.length - 1) return;
+    L.circleMarker(latlng, {{
+      radius: 3,
+      color: "#ffffff",
+      weight: 1,
+      fillColor: routeColorForMode(routeSamples[index].mode || "Unknown"),
+      fillOpacity: 0.95
+    }}).addTo(map);
   }});
   const hoverMarker = L.circleMarker(points[0], {{ radius: 6, color: "#ffffff", weight: 2, fillColor: "#1769c2", fillOpacity: 1 }}).addTo(map);
   map.on("mousemove", event => {{
@@ -1389,20 +1402,43 @@ function initCesiumRoute(moduleNode) {{
     panel.classList.add("map-failed");
     return;
   }}
+  viewer.scene.globe.depthTestAgainstTerrain = false;
+  const lats = routeSamples.map(point => Number(point.latitude_deg));
+  const lons = routeSamples.map(point => Number(point.longitude_deg));
+  const alts = routeSamples.map(point => Math.max(1, Number(point.relative_altitude_m) || 1));
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+  const minAlt = Math.min(...alts), maxAlt = Math.max(...alts);
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLon = (minLon + maxLon) / 2;
+  const latMeters = Math.max(50, Math.abs(maxLat - minLat) * 111320);
+  const lonMeters = Math.max(50, Math.abs(maxLon - minLon) * 111320 * Math.max(0.1, Math.cos(centerLat * Math.PI / 180)));
+  const routeSpanMeters = Math.max(latMeters, lonMeters, maxAlt - minAlt, 250);
+  const altitudeScale = Math.max(1, Math.min(8, 900 / Math.max(80, maxAlt - minAlt || 1)));
   const positions = routeSamples.map(point => Cesium.Cartesian3.fromDegrees(
     Number(point.longitude_deg),
     Number(point.latitude_deg),
-    Math.max(1, Number(point.relative_altitude_m) || 1)
+    Math.max(2, (Number(point.relative_altitude_m) || 1) * altitudeScale)
   ));
+  viewer.entities.add({{
+    name: "Route ground shadow",
+    polyline: {{
+      positions: routeSamples.map(point => Cesium.Cartesian3.fromDegrees(Number(point.longitude_deg), Number(point.latitude_deg), 1)),
+      width: 3,
+      material: Cesium.Color.BLACK.withAlpha(0.45),
+      clampToGround: false
+    }}
+  }});
   viewer.entities.add({{
     name: "Drone route",
     polyline: {{
       positions,
-      width: 5,
+      width: 8,
       material: new Cesium.PolylineGlowMaterialProperty({{
-        glowPower: 0.18,
-        color: Cesium.Color.fromCssColorString("#1769c2")
-      }})
+        glowPower: 0.28,
+        color: Cesium.Color.CYAN
+      }}),
+      clampToGround: false
     }}
   }});
   viewer.entities.add({{
@@ -1430,12 +1466,19 @@ function initCesiumRoute(moduleNode) {{
     const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
     const point = nearestRoutePoint(Cesium.Math.toDegrees(cartographic.latitude), Cesium.Math.toDegrees(cartographic.longitude));
     if (!point) return;
-    hoverEntity.position = Cesium.Cartesian3.fromDegrees(Number(point.longitude_deg), Number(point.latitude_deg), Math.max(1, Number(point.relative_altitude_m) || 1));
+    hoverEntity.position = Cesium.Cartesian3.fromDegrees(Number(point.longitude_deg), Number(point.latitude_deg), Math.max(2, (Number(point.relative_altitude_m) || 1) * altitudeScale));
     hoverEntity.label.text = formatTime(point.time_s) + "\\n" +
       "Mode: " + (point.mode || "Unknown") + "\\n" +
       "Alt: " + formatValue(point.relative_altitude_m) + " m | Speed: " + formatValue(point.groundspeed_m_s) + " m/s";
   }}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-  viewer.zoomTo(viewer.entities);
+  viewer.camera.setView({{
+    destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, Math.max(600, routeSpanMeters * 2.4)),
+    orientation: {{
+      heading: Cesium.Math.toRadians(0),
+      pitch: Cesium.Math.toRadians(-62),
+      roll: 0
+    }}
+  }});
   panel.classList.add("has-cesium");
   panel.classList.remove("map-failed");
   routeMapState.set(container, viewer);
