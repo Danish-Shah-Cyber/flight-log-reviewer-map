@@ -1443,12 +1443,22 @@ function initCesiumRoute(moduleNode) {{
     navigationHelpButton: false,
     terrainProvider: new Cesium.EllipsoidTerrainProvider()
   }};
-  if (Cesium.UrlTemplateImageryProvider) {{
-    viewerOptions.imageryProvider = new Cesium.UrlTemplateImageryProvider({{
+  let osmProvider = null;
+  if (Cesium.OpenStreetMapImageryProvider) {{
+    osmProvider = new Cesium.OpenStreetMapImageryProvider({{
+      url: "https://tile.openstreetmap.org/"
+    }});
+  }} else if (Cesium.UrlTemplateImageryProvider) {{
+    osmProvider = new Cesium.UrlTemplateImageryProvider({{
       url: "https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png",
       maximumLevel: 19,
       credit: "OpenStreetMap"
     }});
+  }}
+  if (osmProvider && Cesium.ImageryLayer) {{
+    viewerOptions.baseLayer = new Cesium.ImageryLayer(osmProvider);
+  }} else if (osmProvider) {{
+    viewerOptions.imageryProvider = osmProvider;
   }}
   let viewer;
   try {{
@@ -1458,6 +1468,8 @@ function initCesiumRoute(moduleNode) {{
     return;
   }}
   viewer.scene.globe.depthTestAgainstTerrain = false;
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#d7e2c8");
+  if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
   const lats = routeSamples.map(point => Number(point.latitude_deg));
   const lons = routeSamples.map(point => Number(point.longitude_deg));
   const alts = routeSamples.map(point => Math.max(1, Number(point.relative_altitude_m) || 1));
