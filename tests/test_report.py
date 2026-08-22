@@ -57,6 +57,8 @@ class ReportTests(unittest.TestCase):
         self.assertIn("leaflet-route-map", document)
         self.assertIn("cesium-route-map", document)
         self.assertIn("route-3d-fallback", document)
+        self.assertIn("route-static-map", document)
+        self.assertIn("Altitude-projected route", document)
         self.assertIn("initCanvasRoute", document)
         self.assertIn("routePopupHtml", document)
         self.assertIn("OpenStreetMapImageryProvider", document)

@@ -169,6 +169,38 @@ def _route_map(samples: list[FlightSample]) -> str:
         points = " ".join(f"{px:.1f},{py:.1f}" for px, py in current_points)
         paths.append(f'<polyline points="{points}" stroke="{mode_colors[current_mode]}"/>')
 
+    altitudes = [sample.relative_altitude_m for sample in route_samples]
+    min_alt, max_alt = min(altitudes), max(altitudes)
+    alt_span = max_alt - min_alt or 1.0
+    projected_3d: list[tuple[FlightSample, float, float]] = []
+    for sample, x_value, y_value in zip(route_samples, raw_x, raw_y):
+        base_x = padding + (x_value - min_x) / span_x * (width - padding * 2)
+        base_y = height - padding - (y_value - min_y) / span_y * (height - padding * 2) * 0.58
+        altitude_offset = (sample.relative_altitude_m - min_alt) / alt_span * (height * 0.34)
+        perspective_x = base_x + ((y_value - min_y) / span_y - 0.5) * 70
+        perspective_y = base_y - altitude_offset
+        projected_3d.append(
+            (
+                sample,
+                min(width - padding, max(padding, perspective_x)),
+                min(height - padding, max(padding, perspective_y)),
+            )
+        )
+
+    paths_3d: list[str] = []
+    current_mode = projected_3d[0][0].mode
+    current_points = []
+    for sample, x, y in projected_3d:
+        if sample.mode != current_mode and len(current_points) > 1:
+            points = " ".join(f"{px:.1f},{py:.1f}" for px, py in current_points)
+            paths_3d.append(f'<polyline points="{points}" stroke="{mode_colors[current_mode]}"/>')
+            current_points = current_points[-1:]
+            current_mode = sample.mode
+        current_points.append((x, y))
+    if len(current_points) > 1:
+        points = " ".join(f"{px:.1f},{py:.1f}" for px, py in current_points)
+        paths_3d.append(f'<polyline points="{points}" stroke="{mode_colors[current_mode]}"/>')
+
     display_points = _downsample(route_samples, 160)
     point_lookup = {id(sample): (x, y) for sample, x, y in projected}
     sample_dots = "".join(
@@ -177,6 +209,8 @@ def _route_map(samples: list[FlightSample]) -> str:
     )
     start_sample, start_x, start_y = projected[0]
     end_sample, end_x, end_y = projected[-1]
+    start_3d, start_3d_x, start_3d_y = projected_3d[0]
+    end_3d, end_3d_x, end_3d_y = projected_3d[-1]
     return f"""<div class="route-meta">
       <div><span class="muted">Start</span><strong>{html.escape(_format_position(start_sample))}</strong></div>
       <div><span class="muted">End</span><strong>{html.escape(_format_position(end_sample))}</strong></div>
@@ -188,12 +222,38 @@ def _route_map(samples: list[FlightSample]) -> str:
       <button class="route-tab" type="button" data-route-view="route-svg">Path</button>
     </div>
     <div class="route-view active" data-route-panel="route-2d">
+      <svg class="route-map route-static-map" viewBox="0 0 {width} {height}" role="img" aria-label="Immediate 2D drone route path">
+        <rect x="1" y="1" width="{width - 2}" height="{height - 2}" rx="8" class="map-bg"/>
+        <g class="grid-lines">
+          <line x1="180" y1="0" x2="180" y2="{height}"/><line x1="360" y1="0" x2="360" y2="{height}"/>
+          <line x1="540" y1="0" x2="540" y2="{height}"/><line x1="720" y1="0" x2="720" y2="{height}"/>
+          <line x1="0" y1="90" x2="{width}" y2="90"/><line x1="0" y1="180" x2="{width}" y2="180"/>
+          <line x1="0" y1="270" x2="{width}" y2="270"/>
+        </g>
+        <g class="route-path">{"".join(paths)}</g>
+        <g class="route-dots">{sample_dots}</g>
+        <circle cx="{start_x:.1f}" cy="{start_y:.1f}" r="6" class="start-marker"/><text x="{start_x + 9:.1f}" y="{start_y - 9:.1f}">Start</text>
+        <circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="6" class="end-marker"/><text x="{end_x + 9:.1f}" y="{end_y - 9:.1f}">End</text>
+      </svg>
       <canvas class="canvas-route-map" aria-label="2D drone route map fallback"></canvas>
       <div class="leaflet-route-map" aria-label="2D drone route map"></div>
       <div class="route-inspector muted">Hover the route for time, mode, speed, altitude, and location.</div>
       <div class="map-empty muted">Using the built-in 2D route view because online map tiles are unavailable.</div>
     </div>
     <div class="route-view" data-route-panel="route-3d">
+      <svg class="route-map route-static-map route-static-3d" viewBox="0 0 {width} {height}" role="img" aria-label="Immediate altitude-aware 3D drone route path">
+        <rect x="1" y="1" width="{width - 2}" height="{height - 2}" rx="8" class="map-bg"/>
+        <g class="grid-lines">
+          <line x1="180" y1="0" x2="180" y2="{height}"/><line x1="360" y1="0" x2="360" y2="{height}"/>
+          <line x1="540" y1="0" x2="540" y2="{height}"/><line x1="720" y1="0" x2="720" y2="{height}"/>
+          <line x1="0" y1="90" x2="{width}" y2="90"/><line x1="0" y1="180" x2="{width}" y2="180"/>
+          <line x1="0" y1="270" x2="{width}" y2="270"/>
+        </g>
+        <g class="route-path">{"".join(paths_3d)}</g>
+        <circle cx="{start_3d_x:.1f}" cy="{start_3d_y:.1f}" r="6" class="start-marker"/><text x="{start_3d_x + 9:.1f}" y="{start_3d_y - 9:.1f}">Start</text>
+        <circle cx="{end_3d_x:.1f}" cy="{end_3d_y:.1f}" r="6" class="end-marker"/><text x="{end_3d_x + 9:.1f}" y="{end_3d_y - 9:.1f}">End</text>
+        <text x="22" y="28">Altitude-projected route: {min_alt:.1f} m to {max_alt:.1f} m</text>
+      </svg>
       <div class="cesium-route-map" aria-label="Cesium 3D drone route map"></div>
       <canvas class="route-3d-fallback" aria-label="3D drone route fallback"></canvas>
       <div class="route-inspector muted">Hover the 3D route for time, mode, speed, altitude, and location.</div>
@@ -740,6 +800,8 @@ polyline {{ fill: none; stroke-width: 3; stroke-linejoin: round; }}
 .leaflet-route-map, .cesium-route-map, .canvas-route-map, .route-3d-fallback {{ width: 100%; height: clamp(360px, 48vh, 620px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }}
 .canvas-route-map, .route-3d-fallback {{ display: block; }}
 .leaflet-route-map, .cesium-route-map {{ display: none; }}
+.route-static-map {{ margin-bottom: 10px; }}
+.route-view.has-canvas .route-static-map, .route-view.has-leaflet .route-static-map, .route-view.has-cesium .route-static-map {{ display: none; }}
 .route-view.has-leaflet .canvas-route-map {{ display: none; }}
 .route-view.has-leaflet .leaflet-route-map {{ display: block; }}
 .route-view.has-cesium .route-3d-fallback {{ display: none; }}
@@ -816,8 +878,6 @@ ul {{ padding-left: 20px; }}
   </main>
 </div>
 {templates}
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/cesium@1.121.1/Build/Cesium/Cesium.js"></script>
 <script>
 const defaultModules = {default_json};
 const flightSamples = {sample_json};
@@ -1173,6 +1233,7 @@ function initCanvasRoute(moduleNode, selector, mode) {{
   if (!canvas || canvas.dataset.ready) return;
   canvas.dataset.ready = "true";
   let projected = drawRouteCanvas(canvas, mode);
+  if (projected.length) canvas.parentElement.classList.add("has-canvas");
   canvas.addEventListener("mousemove", event => {{
     const box = canvas.getBoundingClientRect();
     const x = event.clientX - box.left;
@@ -1489,5 +1550,8 @@ document.getElementById("themeToggle").addEventListener("click", () => {{
 }});
 document.documentElement.dataset.theme = localStorage.getItem(themeKey) || "light";
 loadLayout();
-</script></body></html>"""
+</script>
+<script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/cesium@1.121.1/Build/Cesium/Cesium.js"></script>
+</body></html>"""
     destination.write_text(document, encoding="utf-8")
