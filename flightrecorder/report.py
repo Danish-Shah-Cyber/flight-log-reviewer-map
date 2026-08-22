@@ -188,12 +188,16 @@ def _route_map(samples: list[FlightSample]) -> str:
       <button class="route-tab" type="button" data-route-view="route-svg">Path</button>
     </div>
     <div class="route-view active" data-route-panel="route-2d">
+      <canvas class="canvas-route-map" aria-label="2D drone route map fallback"></canvas>
       <div class="leaflet-route-map" aria-label="2D drone route map"></div>
-      <div class="map-empty muted">2D map library unavailable. Use the Path tab while offline.</div>
+      <div class="route-inspector muted">Hover the route for time, mode, speed, altitude, and location.</div>
+      <div class="map-empty muted">Using the built-in 2D route view because online map tiles are unavailable.</div>
     </div>
     <div class="route-view" data-route-panel="route-3d">
       <div class="cesium-route-map" aria-label="Cesium 3D drone route map"></div>
-      <div class="map-empty muted">Cesium 3D map library unavailable. Use the Path tab while offline.</div>
+      <canvas class="route-3d-fallback" aria-label="3D drone route fallback"></canvas>
+      <div class="route-inspector muted">Hover the 3D route for time, mode, speed, altitude, and location.</div>
+      <div class="map-empty muted">Using the built-in 3D route view because Cesium is unavailable.</div>
     </div>
     <div class="route-view" data-route-panel="route-svg">
       <svg class="route-map" viewBox="0 0 {width} {height}" role="img" aria-label="Drone route path">
@@ -544,7 +548,14 @@ polyline {{ fill: none; stroke-width: 3; stroke-linejoin: round; }}
 .route-tab.active {{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }}
 .route-view {{ display: none; position: relative; }}
 .route-view.active {{ display: block; }}
-.leaflet-route-map, .cesium-route-map {{ width: 100%; height: clamp(360px, 48vh, 620px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }}
+.leaflet-route-map, .cesium-route-map, .canvas-route-map, .route-3d-fallback {{ width: 100%; height: clamp(360px, 48vh, 620px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel-2); }}
+.canvas-route-map, .route-3d-fallback {{ display: block; }}
+.leaflet-route-map, .cesium-route-map {{ display: none; }}
+.route-view.has-leaflet .canvas-route-map {{ display: none; }}
+.route-view.has-leaflet .leaflet-route-map {{ display: block; }}
+.route-view.has-cesium .route-3d-fallback {{ display: none; }}
+.route-view.has-cesium .cesium-route-map {{ display: block; }}
+.route-inspector {{ border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 10px 12px; margin-top: 10px; min-height: 44px; overflow-wrap: anywhere; }}
 .map-empty {{ display: none; border: 1px dashed var(--line); border-radius: 8px; padding: 14px; margin-top: 10px; }}
 .route-view.map-failed .map-empty {{ display: block; }}
 .leaflet-popup-content {{ color: #18202b; min-width: 210px; }}
@@ -798,6 +809,149 @@ function routeColorForMode(mode) {{
   return palette[Math.max(0, modes.indexOf(mode || "Unknown")) % palette.length];
 }}
 
+function routeBounds() {{
+  const lats = routeSamples.map(point => Number(point.latitude_deg));
+  const lons = routeSamples.map(point => Number(point.longitude_deg));
+  return {{
+    minLat: Math.min(...lats),
+    maxLat: Math.max(...lats),
+    minLon: Math.min(...lons),
+    maxLon: Math.max(...lons),
+    minAlt: Math.min(...routeSamples.map(point => Number(point.relative_altitude_m) || 0)),
+    maxAlt: Math.max(...routeSamples.map(point => Number(point.relative_altitude_m) || 0))
+  }};
+}}
+
+function routeCanvasSetup(canvas) {{
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(320, Math.floor(rect.width || canvas.clientWidth || 900));
+  const height = Math.max(280, Math.floor(rect.height || 420));
+  const scale = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(width * scale);
+  canvas.height = Math.floor(height * scale);
+  const context = canvas.getContext("2d");
+  context.setTransform(scale, 0, 0, scale, 0, 0);
+  return {{ context, width, height }};
+}}
+
+function projected2D(width, height) {{
+  const bounds = routeBounds();
+  const pad = 34;
+  const latSpan = bounds.maxLat - bounds.minLat || 0.000001;
+  const lonSpan = bounds.maxLon - bounds.minLon || 0.000001;
+  return routeSamples.map(point => ({{
+    point,
+    x: pad + ((Number(point.longitude_deg) - bounds.minLon) / lonSpan) * (width - pad * 2),
+    y: height - pad - ((Number(point.latitude_deg) - bounds.minLat) / latSpan) * (height - pad * 2)
+  }}));
+}}
+
+function projected3D(width, height) {{
+  const bounds = routeBounds();
+  const pad = 42;
+  const latSpan = bounds.maxLat - bounds.minLat || 0.000001;
+  const lonSpan = bounds.maxLon - bounds.minLon || 0.000001;
+  const altSpan = bounds.maxAlt - bounds.minAlt || 1;
+  return routeSamples.map(point => {{
+    const nx = (Number(point.longitude_deg) - bounds.minLon) / lonSpan;
+    const ny = (Number(point.latitude_deg) - bounds.minLat) / latSpan;
+    const nz = ((Number(point.relative_altitude_m) || 0) - bounds.minAlt) / altSpan;
+    return {{
+      point,
+      x: pad + nx * (width - pad * 2) + (ny - 0.5) * 70,
+      y: height - pad - ny * (height - pad * 2) * 0.58 - nz * (height * 0.34)
+    }};
+  }});
+}}
+
+function drawRouteCanvas(canvas, mode = "2d") {{
+  if (!canvas || routeSamples.length < 2) return [];
+  const {{ context, width, height }} = routeCanvasSetup(canvas);
+  const projected = mode === "3d" ? projected3D(width, height) : projected2D(width, height);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--panel-2").trim() || "#eef2f7";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "rgba(101,113,132,0.28)";
+  context.lineWidth = 1;
+  for (let i = 1; i < 5; i += 1) {{
+    const x = width * i / 5;
+    const y = height * i / 5;
+    context.beginPath();
+    context.moveTo(x, 0);
+    context.lineTo(x, height);
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }}
+  let segmentStart = 0;
+  for (let index = 1; index < projected.length; index += 1) {{
+    const previousMode = projected[index - 1].point.mode || "Unknown";
+    const currentMode = projected[index].point.mode || "Unknown";
+    if (currentMode !== previousMode || index === projected.length - 1) {{
+      const end = index === projected.length - 1 ? index : index - 1;
+      context.beginPath();
+      context.strokeStyle = routeColorForMode(previousMode);
+      context.lineWidth = mode === "3d" ? 5 : 4;
+      context.lineJoin = "round";
+      context.lineCap = "round";
+      context.moveTo(projected[segmentStart].x, projected[segmentStart].y);
+      for (let pointIndex = segmentStart + 1; pointIndex <= end; pointIndex += 1) {{
+        context.lineTo(projected[pointIndex].x, projected[pointIndex].y);
+      }}
+      context.stroke();
+      segmentStart = Math.max(0, end);
+    }}
+  }}
+  const first = projected[0];
+  const last = projected[projected.length - 1];
+  context.font = "700 13px Segoe UI, Arial";
+  context.fillStyle = "#0f8f72";
+  context.beginPath();
+  context.arc(first.x, first.y, 7, 0, Math.PI * 2);
+  context.fill();
+  context.fillText("Start", first.x + 10, first.y - 10);
+  context.fillStyle = "#bf3145";
+  context.beginPath();
+  context.arc(last.x, last.y, 7, 0, Math.PI * 2);
+  context.fill();
+  context.fillText("End", last.x + 10, last.y - 10);
+  return projected;
+}}
+
+function routeInspectorText(point) {{
+  return formatTime(point.time_s) + " | Mode: " + (point.mode || "Unknown") +
+    " | Armed: " + (point.armed ? "Yes" : "No") +
+    " | Alt: " + formatValue(point.relative_altitude_m) + " m" +
+    " | Speed: " + formatValue(point.groundspeed_m_s) + " m/s" +
+    " | Location: " + formatValue(point.latitude_deg) + ", " + formatValue(point.longitude_deg);
+}}
+
+function initCanvasRoute(moduleNode, selector, mode) {{
+  const canvas = moduleNode.querySelector(selector);
+  const inspector = canvas ? canvas.parentElement.querySelector(".route-inspector") : null;
+  if (!canvas || canvas.dataset.ready) return;
+  canvas.dataset.ready = "true";
+  let projected = drawRouteCanvas(canvas, mode);
+  canvas.addEventListener("mousemove", event => {{
+    const box = canvas.getBoundingClientRect();
+    const x = event.clientX - box.left;
+    const y = event.clientY - box.top;
+    let nearest = projected[0];
+    let best = Infinity;
+    projected.forEach(item => {{
+      const dx = item.x - x;
+      const dy = item.y - y;
+      const score = dx * dx + dy * dy;
+      if (score < best) {{
+        best = score;
+        nearest = item;
+      }}
+    }});
+    if (nearest && inspector) inspector.textContent = routeInspectorText(nearest.point);
+  }});
+  window.addEventListener("resize", () => {{ projected = drawRouteCanvas(canvas, mode); }});
+}}
+
 function initLeafletRoute(moduleNode) {{
   const panel = moduleNode.querySelector('[data-route-panel="route-2d"]');
   const container = moduleNode.querySelector(".leaflet-route-map");
@@ -834,6 +988,8 @@ function initLeafletRoute(moduleNode) {{
   L.marker(points[0]).addTo(map).bindPopup("Start<br>" + routePopupHtml(routeSamples[0]));
   L.marker(points[points.length - 1]).addTo(map).bindPopup("End<br>" + routePopupHtml(routeSamples[routeSamples.length - 1]));
   map.fitBounds(points, {{ padding: [28, 28] }});
+  panel.classList.add("has-leaflet");
+  panel.classList.remove("map-failed");
   routeMapState.set(container, map);
 }}
 
@@ -907,6 +1063,8 @@ function initCesiumRoute(moduleNode) {{
       "Alt: " + formatValue(point.relative_altitude_m) + " m | Speed: " + formatValue(point.groundspeed_m_s) + " m/s";
   }}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   viewer.zoomTo(viewer.entities);
+  panel.classList.add("has-cesium");
+  panel.classList.remove("map-failed");
   routeMapState.set(container, viewer);
 }}
 
@@ -920,17 +1078,20 @@ function initRouteMaps(root = document) {{
         tabs.querySelectorAll(".route-tab").forEach(item => item.classList.toggle("active", item === button));
         moduleNode.querySelectorAll(".route-view").forEach(panel => panel.classList.toggle("active", panel.dataset.routePanel === button.dataset.routeView));
         if (button.dataset.routeView === "route-2d") {{
+          initCanvasRoute(moduleNode, ".canvas-route-map", "2d");
           initLeafletRoute(moduleNode);
           const map = routeMapState.get(moduleNode.querySelector(".leaflet-route-map"));
           if (map && map.invalidateSize) setTimeout(() => map.invalidateSize(), 20);
         }}
         if (button.dataset.routeView === "route-3d") {{
+          initCanvasRoute(moduleNode, ".route-3d-fallback", "3d");
           initCesiumRoute(moduleNode);
           const viewer = routeMapState.get(moduleNode.querySelector(".cesium-route-map"));
           if (viewer && viewer.resize) setTimeout(() => viewer.resize(), 20);
         }}
       }});
     }});
+    initCanvasRoute(moduleNode, ".canvas-route-map", "2d");
     initLeafletRoute(moduleNode);
   }});
 }}

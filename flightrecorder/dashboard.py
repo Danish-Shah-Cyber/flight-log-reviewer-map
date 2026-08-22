@@ -34,6 +34,12 @@ MAX_UPLOAD_MB = MAX_UPLOAD_BYTES // (1024 * 1024)
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024
 
 
+def _temp_root() -> Path:
+    root = Path(os.environ.get("FLIGHTRECORDER_TMP_DIR", "work/tmp"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
 PAGE = """<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>Flight Data Dashboard</title><style>
 :root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--panel-2:#eef2f7;--text:#18202b;--muted:#657184;--line:#d9e0ea;--accent:#1769c2;--danger:#bf3145;--shadow:0 12px 36px rgba(29,39,58,.11)}
@@ -90,6 +96,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(b"Not found", "text/plain", 404)
             return
         try:
+            tempfile.tempdir = str(_temp_root())
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > MAX_REQUEST_BYTES:
                 raise ValueError(f"The upload is empty or exceeds {MAX_UPLOAD_MB} MB")
@@ -107,7 +114,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             suffix = Path(original).suffix.lower()
             if suffix not in {".tlog", ".bin", ".log"}:
                 raise ValueError("Please select a .tlog, .BIN, or .log file")
-            with tempfile.TemporaryDirectory(prefix="flight-analyzer-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="flight-analyzer-", dir=_temp_root()) as temp_dir:
                 token = uuid.uuid4().hex[:10]
                 upload = Path(temp_dir) / f"{token}{suffix}"
                 uploaded_bytes = 0
