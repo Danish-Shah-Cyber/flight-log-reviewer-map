@@ -1361,15 +1361,14 @@ function initLeafletRoute(moduleNode) {{
     attribution: "&copy; OpenStreetMap contributors",
     maxZoom: 20
   }}).addTo(map);
-  L.polyline(points, {{ color: "#111827", weight: 10, opacity: 0.72, lineCap: "round", lineJoin: "round" }}).addTo(map);
-  L.polyline(points, {{ color: "#19b7ff", weight: 5, opacity: 1, lineCap: "round", lineJoin: "round" }}).addTo(map);
+  L.polyline(points, {{ color: "#111827", weight: 12, opacity: 0.42, lineCap: "round", lineJoin: "round" }}).addTo(map);
   let segment = [points[0]];
   let mode = routeSamples[0].mode || "Unknown";
   routeSamples.slice(1).forEach((point, index) => {{
     const nextMode = point.mode || "Unknown";
     segment.push(points[index + 1]);
     if (nextMode !== mode || index === routeSamples.length - 2) {{
-      L.polyline(segment, {{ color: routeColorForMode(mode), weight: 7, opacity: 0.95, lineCap: "round", lineJoin: "round" }}).addTo(map);
+      L.polyline(segment, {{ color: routeColorForMode(mode), weight: 8, opacity: 1, lineCap: "round", lineJoin: "round" }}).addTo(map);
       segment = [points[index + 1]];
       mode = nextMode;
     }}
@@ -1497,15 +1496,34 @@ function initCesiumRoute(moduleNode) {{
     }}
   }});
   viewer.entities.add({{
-    name: "Drone route",
+    name: "Drone route hit path",
     polyline: {{
       positions,
-      width: 8,
-      material: new Cesium.PolylineGlowMaterialProperty({{
-        glowPower: 0.28,
-        color: Cesium.Color.CYAN
-      }}),
+      width: 12,
+      material: Cesium.Color.BLACK.withAlpha(0.22),
       clampToGround: false
+    }}
+  }});
+  let cesiumSegment = [positions[0]];
+  let cesiumMode = routeSamples[0].mode || "Unknown";
+  routeSamples.slice(1).forEach((point, index) => {{
+    const nextMode = point.mode || "Unknown";
+    cesiumSegment.push(positions[index + 1]);
+    if (nextMode !== cesiumMode || index === routeSamples.length - 2) {{
+      viewer.entities.add({{
+        name: "Mode segment: " + cesiumMode,
+        polyline: {{
+          positions: cesiumSegment.slice(),
+          width: 8,
+          material: new Cesium.PolylineGlowMaterialProperty({{
+            glowPower: 0.22,
+            color: Cesium.Color.fromCssColorString(routeColorForMode(cesiumMode))
+          }}),
+          clampToGround: false
+        }}
+      }});
+      cesiumSegment = [positions[index + 1]];
+      cesiumMode = nextMode;
     }}
   }});
   viewer.entities.add({{
@@ -1546,7 +1564,7 @@ function initCesiumRoute(moduleNode) {{
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
   handler.setInputAction(movement => {{
     const picked = viewer.scene.pick(movement.endPosition);
-    if (!picked || !picked.id || !["Drone route", "Route ground shadow"].includes(picked.id.name)) {{
+    if (!picked || !picked.id || !(picked.id.name === "Drone route hit path" || picked.id.name === "Route ground shadow" || String(picked.id.name || "").startsWith("Mode segment:"))) {{
       hoverEntity.show = false;
       return;
     }}
