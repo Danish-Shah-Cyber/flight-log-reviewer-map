@@ -61,7 +61,10 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Altitude-projected route", document)
         self.assertIn("initCanvasRoute", document)
         self.assertIn("routePopupHtml", document)
-        self.assertIn("OpenStreetMapImageryProvider", document)
+        self.assertIn("CESIUM_BASE_URL", document)
+        self.assertIn("loadScriptWithFallback", document)
+        self.assertIn("UrlTemplateImageryProvider", document)
+        self.assertIn("loadMapLibraries", document)
 
     def test_report_notes_downsampled_display(self):
         samples = generate_flight(duration_s=12100)

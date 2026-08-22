@@ -719,7 +719,7 @@ def write_html_report(
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Flight Data Dashboard</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.121.1/Build/Cesium/Widgets/widgets.css">
+<link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Widgets/widgets.css">
 <style>
 :root {{
   color-scheme: light;
@@ -893,6 +893,7 @@ const themeKey = "flight-dashboard-theme";
 const svgNS = "http://www.w3.org/2000/svg";
 const plotState = new WeakMap();
 const routeMapState = new WeakMap();
+window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/";
 
 function formatTime(seconds) {{
   const safe = Math.max(0, Number(seconds) || 0);
@@ -1110,6 +1111,65 @@ function routeColorForMode(mode) {{
   return palette[Math.max(0, modes.indexOf(mode || "Unknown")) % palette.length];
 }}
 
+function loadScriptWithFallback(name, sources, isReady) {{
+  if (isReady()) return Promise.resolve(true);
+  if (window[name + "Loading"]) return window[name + "Loading"];
+  window[name + "Loading"] = new Promise(resolve => {{
+    let index = 0;
+    function tryNext() {{
+      if (isReady()) {{
+        resolve(true);
+        return;
+      }}
+      if (index >= sources.length) {{
+        resolve(false);
+        return;
+      }}
+      const script = document.createElement("script");
+      script.src = sources[index];
+      script.async = true;
+      script.crossOrigin = "anonymous";
+      index += 1;
+      script.onload = () => resolve(isReady());
+      script.onerror = tryNext;
+      document.head.appendChild(script);
+    }}
+    tryNext();
+  }});
+  return window[name + "Loading"];
+}}
+
+function activeRouteModule() {{
+  return workspace.querySelector('[data-module="map"]');
+}}
+
+function retryActiveRouteMaps() {{
+  const moduleNode = activeRouteModule();
+  if (!moduleNode) return;
+  const activePanel = moduleNode.querySelector(".route-view.active");
+  initCanvasRoute(moduleNode, ".canvas-route-map", "2d");
+  if (activePanel && activePanel.dataset.routePanel === "route-2d") initLeafletRoute(moduleNode);
+  if (activePanel && activePanel.dataset.routePanel === "route-3d") {{
+    initCanvasRoute(moduleNode, ".route-3d-fallback", "3d");
+    initCesiumRoute(moduleNode);
+  }}
+}}
+
+function loadMapLibraries() {{
+  loadScriptWithFallback("leaflet", [
+    "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+    "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
+  ], () => Boolean(window.L)).then(loaded => {{
+    if (loaded) retryActiveRouteMaps();
+  }});
+  loadScriptWithFallback("cesium", [
+    "https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js",
+    "https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/Cesium.js"
+  ], () => Boolean(window.Cesium)).then(loaded => {{
+    if (loaded) retryActiveRouteMaps();
+  }});
+}}
+
 function routeBounds() {{
   const lats = routeSamples.map(point => Number(point.latitude_deg));
   const lons = routeSamples.map(point => Number(point.longitude_deg));
@@ -1259,7 +1319,6 @@ function initLeafletRoute(moduleNode) {{
   const container = moduleNode.querySelector(".leaflet-route-map");
   if (!panel || !container || routeMapState.get(container)) return;
   if (!window.L || routeSamples.length < 2) {{
-    panel.classList.add("map-failed");
     return;
   }}
   const points = routeSamples.map(point => [Number(point.latitude_deg), Number(point.longitude_deg)]);
@@ -1300,11 +1359,10 @@ function initCesiumRoute(moduleNode) {{
   const container = moduleNode.querySelector(".cesium-route-map");
   if (!panel || !container || routeMapState.get(container)) return;
   if (!window.Cesium || routeSamples.length < 2) {{
-    panel.classList.add("map-failed");
     return;
   }}
   Cesium.Ion.defaultAccessToken = "";
-  const viewer = new Cesium.Viewer(container, {{
+  const viewerOptions = {{
     animation: false,
     baseLayerPicker: false,
     fullscreenButton: false,
@@ -1315,9 +1373,22 @@ function initCesiumRoute(moduleNode) {{
     selectionIndicator: false,
     timeline: false,
     navigationHelpButton: false,
-    imageryProvider: new Cesium.OpenStreetMapImageryProvider({{ url: "https://a.tile.openstreetmap.org/" }}),
     terrainProvider: new Cesium.EllipsoidTerrainProvider()
-  }});
+  }};
+  if (Cesium.UrlTemplateImageryProvider) {{
+    viewerOptions.imageryProvider = new Cesium.UrlTemplateImageryProvider({{
+      url: "https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png",
+      maximumLevel: 19,
+      credit: "OpenStreetMap"
+    }});
+  }}
+  let viewer;
+  try {{
+    viewer = new Cesium.Viewer(container, viewerOptions);
+  }} catch (error) {{
+    panel.classList.add("map-failed");
+    return;
+  }}
   const positions = routeSamples.map(point => Cesium.Cartesian3.fromDegrees(
     Number(point.longitude_deg),
     Number(point.latitude_deg),
@@ -1550,8 +1621,7 @@ document.getElementById("themeToggle").addEventListener("click", () => {{
 }});
 document.documentElement.dataset.theme = localStorage.getItem(themeKey) || "light";
 loadLayout();
+loadMapLibraries();
 </script>
-<script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/cesium@1.121.1/Build/Cesium/Cesium.js"></script>
 </body></html>"""
     destination.write_text(document, encoding="utf-8")
