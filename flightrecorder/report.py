@@ -248,6 +248,146 @@ def _data_explorer(columns: list[str]) -> str:
     <div class="table-scroll"><table class="data-table"><thead><tr>{headers}</tr></thead><tbody></tbody></table></div>"""
 
 
+def _parameter_review(samples: list[FlightSample]) -> str:
+    rows = []
+    for column in FlightSample.column_names():
+        values = [getattr(sample, column) for sample in samples]
+        numeric = [float(value) for value in values if isinstance(value, (int, float))]
+        if numeric:
+            minimum = f"{min(numeric):.3f}"
+            maximum = f"{max(numeric):.3f}"
+            first = f"{numeric[0]:.3f}"
+            last = f"{numeric[-1]:.3f}"
+        else:
+            unique = list(dict.fromkeys(str(value) for value in values))
+            minimum = maximum = f"{len(unique)} unique"
+            first = html.escape(str(values[0])) if values else ""
+            last = html.escape(str(values[-1])) if values else ""
+        rows.append(
+            f"<tr><td>{html.escape(column)}</td><td>{first}</td><td>{last}</td>"
+            f"<td>{minimum}</td><td>{maximum}</td><td>{len(values)}</td></tr>"
+        )
+    return f"""<div class="data-controls">
+      <input class="parameter-search" type="search" placeholder="Filter parameters">
+      <span class="muted">Normalized signals currently available from the parser.</span>
+    </div>
+    <div class="table-scroll"><table class="parameter-table"><thead><tr><th>Parameter</th><th>First</th><th>Last</th><th>Min / categories</th><th>Max / categories</th><th>Samples</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>"""
+
+
+def _timestamped_messages(summary: FlightSummary) -> str:
+    rows = "".join(
+        f"<tr><td>{event.time_s:.2f}</td><td>{html.escape(event.kind)}</td><td>{html.escape(event.description)}</td></tr>"
+        for event in summary.events
+    ) or "<tr><td colspan=\"3\">No timestamped messages or generated events were found.</td></tr>"
+    return f"""<div class="data-controls">
+      <input class="message-search" type="search" placeholder="Filter messages">
+      <span class="muted">Parser-level messages will appear here as extraction expands.</span>
+    </div>
+    <div class="table-scroll"><table class="message-table"><thead><tr><th>Time (s)</th><th>Type</th><th>Message</th></tr></thead><tbody>{rows}</tbody></table></div>"""
+
+
+def _manual_inputs(samples: list[FlightSample]) -> str:
+    return f"""<div class="module-note">
+      <strong>RCIN / Manual Inputs</strong>
+      <p class="muted">Dedicated RC channel extraction is planned for BIN/LOG parsing. Current normalized review shows throttle input where available.</p>
+    </div>
+    {_chart("Throttle command", "throttle_pct", "%", "#1769c2", samples)}
+    {_chart("Ground speed response", "groundspeed_m_s", "m/s", "#0f8f72", samples)}"""
+
+
+def _actuator_outputs(samples: list[FlightSample]) -> str:
+    return f"""<div class="module-note">
+      <strong>RCOUT / Actuator Outputs</strong>
+      <p class="muted">Motor and servo output channels will be shown here once RCOUT/SERVO extraction is added. Current proxy views battery load and throttle demand.</p>
+    </div>
+    {_chart("Throttle demand", "throttle_pct", "%", "#b36b00", samples)}
+    {_chart("Battery current", "battery_current_a", "A", "#bf3145", samples)}
+    {_chart("Battery voltage", "battery_voltage_v", "V", "#7357c8", samples)}"""
+
+
+def _custom_graph_builder() -> str:
+    options = "".join(f"<option value=\"{html.escape(column)}\">{html.escape(column)}</option>" for column in FlightSample.column_names())
+    return f"""<div class="custom-graph-builder">
+      <div class="data-controls">
+        <select class="graph-x"><option value="time_s">time_s</option>{options}</select>
+        <select class="graph-y">{options}</select>
+        <button class="ghost graph-add" type="button">Plot selected signal</button>
+        <button class="ghost graph-clear" type="button">Clear</button>
+      </div>
+      <div class="custom-plot-list"></div>
+    </div>"""
+
+
+def _pid_review(samples: list[FlightSample]) -> str:
+    return f"""<div class="module-note">
+      <strong>PID Review</strong>
+      <p class="muted">Full desired-vs-actual PID analysis needs ATT/RATE/desired setpoint extraction. This view starts with attitude response, yaw behaviour, throttle demand, and control stability clues.</p>
+    </div>
+    {_chart("Roll response", "roll_deg", "deg", "#0b8f8f", samples)}
+    {_chart("Pitch response", "pitch_deg", "deg", "#9a6b00", samples)}
+    {_chart("Yaw response", "yaw_deg", "deg", "#7357c8", samples)}
+    {_chart("Throttle demand", "throttle_pct", "%", "#bf3145", samples)}"""
+
+
+def _home_overview(
+    samples: list[FlightSample],
+    summary: FlightSummary,
+    insights: InsightReport | None,
+    quality: DataQualityReport,
+) -> str:
+    route_samples = _valid_route_samples(samples)
+    start = samples[0]
+    end = samples[-1]
+    start_location = _format_position(route_samples[0]) if route_samples else "No GPS"
+    end_location = _format_position(route_samples[-1]) if route_samples else "No GPS"
+    modes = ", ".join(list(dict.fromkeys(sample.mode for sample in samples))[:8]) or "Unknown"
+    findings = insights.findings if insights else []
+    finding_rows = "".join(
+        f"<tr><td>{item.start_s:.1f}-{item.end_s:.1f}</td><td>{html.escape(item.severity.upper())}</td><td>{html.escape(item.title)}</td></tr>"
+        for item in findings[:8]
+    ) or "<tr><td colspan=\"3\">No major findings generated.</td></tr>"
+    return f"""<div class="home-grid">
+      <div class="home-card wide"><span class="muted">Flight window</span><strong>{start.time_s:.1f} s to {end.time_s:.1f} s</strong><p class="muted">Log-relative time. Absolute start/end time will appear when parser extracts GPS/system timestamps.</p></div>
+      <div class="home-card"><span class="muted">Duration</span><strong>{summary.duration_s:.0f} s</strong></div>
+      <div class="home-card"><span class="muted">Distance</span><strong>{summary.distance_km:.2f} km</strong></div>
+      <div class="home-card"><span class="muted">Max altitude</span><strong>{summary.max_altitude_m:.1f} m</strong></div>
+      <div class="home-card"><span class="muted">Max speed</span><strong>{summary.max_groundspeed_m_s:.1f} m/s</strong></div>
+      <div class="home-card"><span class="muted">Data quality</span><strong>{html.escape(quality.grade)} ({quality.score:.0f}/100)</strong></div>
+      <div class="home-card wide"><span class="muted">Start location</span><strong>{html.escape(start_location)}</strong></div>
+      <div class="home-card wide"><span class="muted">End location</span><strong>{html.escape(end_location)}</strong></div>
+      <div class="home-card wide"><span class="muted">Drone / vehicle</span><strong>Not identified yet</strong><p class="muted">Vehicle metadata will appear here after AUTOPILOT_VERSION, MSG, and parameter extraction are wired in.</p></div>
+      <div class="home-card wide"><span class="muted">Modes used</span><strong>{html.escape(modes)}</strong></div>
+    </div>
+    <h3>Important Findings</h3>
+    <table><thead><tr><th>Time</th><th>Severity</th><th>Finding</th></tr></thead><tbody>{finding_rows}</tbody></table>"""
+
+
+def _ai_report(
+    samples: list[FlightSample],
+    summary: FlightSummary,
+    insights: InsightReport | None,
+    quality: DataQualityReport,
+) -> str:
+    route_samples = _valid_route_samples(samples)
+    start_location = _format_position(route_samples[0]) if route_samples else "No GPS"
+    end_location = _format_position(route_samples[-1]) if route_samples else "No GPS"
+    findings = insights.findings if insights else []
+    findings_list = _list([f"{item.severity.upper()}: {item.title}" for item in findings[:10]], "No notable findings generated.")
+    return f"""<article class="report-document">
+      <p class="muted">CAA/FAA-style structured engineering report. This is not an official authority approval or certification.</p>
+      <h3>1. Flight Overview</h3>
+      <p>The reviewed flight lasted {summary.duration_s:.0f} seconds, covered approximately {summary.distance_km:.2f} km, reached {summary.max_altitude_m:.1f} m maximum relative altitude, and reached {summary.max_groundspeed_m_s:.1f} m/s maximum groundspeed.</p>
+      <h3>2. Location And Operating Area</h3>
+      <p>Recorded route begins at {html.escape(start_location)} and ends at {html.escape(end_location)}. Airspace classification, NOTAM checks, and regulatory approvals must be verified externally.</p>
+      <h3>3. Data Quality Statement</h3>
+      <p>Data quality grade: {html.escape(quality.grade)} ({quality.score:.0f}/100). Analysis conclusions are limited by available signals, parser coverage, and timestamp fidelity.</p>
+      <h3>4. Findings</h3>
+      {findings_list}
+      <h3>5. Reviewer Conclusion</h3>
+      <p>The flight record is suitable for preliminary engineering review. Final operational conclusions should be signed off by a qualified reviewer after validating vehicle identity, maintenance state, pilot inputs, actuator outputs, airspace context, and raw log integrity.</p>
+    </article>"""
+
+
 def _list(items: list[str], empty: str) -> str:
     if not items:
         return f"<p class=\"muted\">{html.escape(empty)}</p>"
@@ -301,6 +441,10 @@ def _module_templates(
         )
 
     modules = {
+        "home": {
+            "title": "Home",
+            "html": _home_overview(samples, summary, insights, quality),
+        },
         "charts": {
             "title": "Flight Trends",
             "html": "".join(
@@ -339,6 +483,30 @@ def _module_templates(
         "events": {
             "title": "Event Timeline",
             "html": f"<table><thead><tr><th>Time (s)</th><th>Type</th><th>Description</th></tr></thead><tbody>{event_rows}</tbody></table>",
+        },
+        "messages": {
+            "title": "Timestamped Messages",
+            "html": _timestamped_messages(summary),
+        },
+        "parameters": {
+            "title": "Parameters",
+            "html": _parameter_review(samples),
+        },
+        "rcin": {
+            "title": "RCIN / Manual Inputs",
+            "html": _manual_inputs(samples),
+        },
+        "rcout": {
+            "title": "RCOUT / Actuator Outputs",
+            "html": _actuator_outputs(samples),
+        },
+        "custom-graphs": {
+            "title": "Custom Graph Builder",
+            "html": _custom_graph_builder(),
+        },
+        "pid": {
+            "title": "PID Review",
+            "html": _pid_review(samples),
         },
         "power": {
             "title": "Power Review",
@@ -397,21 +565,17 @@ def _module_templates(
             "html": _data_explorer(FlightSample.column_names()),
         },
         "ai": {
-            "title": "AI Analyst Placeholder",
-            "html": "<p class=\"muted\">Future module: explain deterministic findings, answer questions, and compare flights without changing raw measurements.</p>",
+            "title": "AI Report",
+            "html": _ai_report(samples, summary, insights, quality),
         },
     }
     templates = []
     for module_id, module in modules.items():
         templates.append(
             f"""<template id="template-{html.escape(module_id)}">
-              <section class="module" data-module="{html.escape(module_id)}" draggable="true">
+              <section class="module" data-module="{html.escape(module_id)}">
                 <div class="module-head">
                   <h2>{html.escape(module["title"])}</h2>
-                  <div>
-                    <button class="icon-button drag-handle" type="button" title="Drag module">Move</button>
-                    <button class="icon-button remove-module" type="button" title="Remove module">Remove</button>
-                  </div>
                 </div>
                 {module["html"]}
               </section>
@@ -432,27 +596,43 @@ def write_html_report(
     display_samples = _downsample(samples, _report_max_samples())
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    default_modules = ["quality", "map", "modes", "charts", "assessment", "events", "data"]
+    default_modules = ["home"]
     module_library = [
+        ("home", "Home", "Overview, timing, location, quality, and key findings"),
         ("quality", "Data Quality", "Signal coverage, gaps, and confidence"),
         ("map", "Route Map", "Drone path, start/end points, and mode colors"),
         ("modes", "Mode Segments", "Mode, arm state, time range, and positions"),
         ("charts", "Flight Trends", "Altitude, speed, and battery plots"),
         ("assessment", "Flight Assessment", "Rule-based findings and evidence"),
         ("events", "Event Timeline", "Detected flight events"),
+        ("messages", "Timestamped Messages", "Log messages, warnings, and event timestamps"),
+        ("parameters", "Parameters", "All extracted parameters and normalized signals"),
+        ("rcin", "RCIN / Manual Inputs", "Pilot command inputs and response"),
+        ("rcout", "RCOUT / Actuator Outputs", "Motor and servo output review"),
+        ("custom-graphs", "Custom Graph Builder", "Choose any signal and build plots"),
+        ("pid", "PID Review", "Control response and tuning review"),
         ("power", "Power Review", "Voltage and current behaviour"),
         ("fuel", "Fuel Flow", "Fuel burn, flow spikes, and endurance"),
         ("gps", "GPS Health", "Fix type, satellites, and HDOP"),
         ("attitude", "Attitude Review", "Roll, pitch, and yaw"),
         ("limitations", "Analysis Limits", "What this report cannot prove"),
         ("data", "All Data", "Browse and export every normalized sample"),
-        ("ai", "AI Analyst", "Future narrative and Q&A assistant"),
+    ]
+    report_library = [
+        ("ai", "AI Report", "CAA/FAA-style structured reviewer conclusion"),
+        ("limitations", "Analysis Limits", "Evidence boundaries and missing context"),
     ]
     library_html = "".join(
-        f"""<button class="library-item" type="button" draggable="true" data-module="{module_id}">
+        f"""<button class="library-item" type="button" data-module="{module_id}">
           <span>{html.escape(title)}</span><small>{html.escape(description)}</small>
         </button>"""
         for module_id, title, description in module_library
+    )
+    report_library_html = "".join(
+        f"""<button class="library-item" type="button" data-module="{module_id}">
+          <span>{html.escape(title)}</span><small>{html.escape(description)}</small>
+        </button>"""
+        for module_id, title, description in report_library
     )
     upload_card = f"""<section class="upload-card">
       <h2>Analyze Log</h2>
@@ -510,7 +690,8 @@ button {{ font: inherit; }}
 .upload-drop input {{ max-width: 100%; font-size: 13px; }}
 .library {{ display: grid; gap: 10px; margin-top: 12px; }}
 .library-item {{ display: grid; gap: 2px; text-align: left; padding: 12px; }}
-.library-item:hover, .drop-target {{ border-color: var(--accent); }}
+.library-item:hover, .library-item.active, .drop-target {{ border-color: var(--accent); }}
+.library-item.active {{ background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }}
 .main {{ padding: 26px; min-width: 0; }}
 .topbar {{ display: flex; justify-content: space-between; gap: 18px; align-items: start; margin-bottom: 18px; }}
 .topbar h2 {{ margin: 0; font-size: 18px; }}
@@ -525,15 +706,23 @@ button {{ font: inherit; }}
 .pill {{ border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 7px 10px; color: var(--muted); }}
 .workspace {{ display: grid; gap: 14px; }}
 .module {{ padding: 16px; overflow: hidden; }}
-.module.dragging {{ opacity: .5; }}
 .module-head {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }}
 .module-head h2 {{ font-size: 17px; margin: 0; }}
 .icon-button {{ padding: 7px 9px; margin-left: 6px; font-size: 13px; }}
+.home-grid {{ display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }}
+.home-card {{ background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 13px; min-height: 92px; }}
+.home-card.wide {{ grid-column: span 2; }}
+.home-card strong {{ display: block; font-size: 18px; margin-top: 7px; overflow-wrap: anywhere; }}
+.module-note {{ border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 12px; margin-bottom: 12px; }}
+.report-document {{ max-width: 980px; }}
+.report-document h3 {{ margin-top: 20px; }}
 .plot {{ margin: 12px 0; }}
 .plot-head {{ display: flex; justify-content: space-between; color: var(--muted); margin-bottom: 7px; }}
 .plot-tools {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }}
 .plot-tools .ghost {{ width: auto; padding: 6px 9px; font-size: 13px; }}
 .plot-readout {{ margin-left: auto; font-size: 13px; }}
+.plot svg {{ touch-action: none; cursor: crosshair; }}
+.plot.panning svg {{ cursor: grabbing; }}
 svg {{ width: 100%; height: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }}
 polyline {{ fill: none; stroke-width: 3; stroke-linejoin: round; }}
 .axis {{ stroke: var(--line); }}
@@ -591,6 +780,8 @@ ul {{ padding-left: 20px; }}
   .sidebar {{ position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
   .essentials {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
   .route-meta {{ grid-template-columns: 1fr; }}
+  .home-grid {{ grid-template-columns: 1fr; }}
+  .home-card.wide {{ grid-column: auto; }}
   .mini-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
   .topbar {{ display: block; }}
 }}
@@ -605,6 +796,8 @@ ul {{ padding-left: 20px; }}
     {upload_card}
     <h2>Insight Library</h2>
     <div class="library">{library_html}</div>
+    <h2>Report & Conclusion</h2>
+    <div class="library">{report_library_html}</div>
   </aside>
   <main class="main">
     <div class="topbar">
@@ -635,9 +828,8 @@ const routeSamples = flightSamples.filter(row => {{
   return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && !(lat === 0 && lon === 0);
 }});
 const workspace = document.getElementById("workspace");
-const storageKey = "flight-dashboard-layout";
+const storageKey = "flight-dashboard-active-module-v2";
 const themeKey = "flight-dashboard-theme";
-let draggedModule = null;
 const svgNS = "http://www.w3.org/2000/svg";
 const plotState = new WeakMap();
 const routeMapState = new WeakMap();
@@ -742,6 +934,30 @@ function initPlot(plot) {{
   if (!times.length) return;
   const fullMin = Math.min(...times);
   const fullMax = Math.max(...times);
+  const svg = plot.querySelector("svg");
+  let panStart = null;
+  function zoomAt(clientX, factor) {{
+    const state = plotState.get(plot);
+    const box = svg.getBoundingClientRect();
+    const left = 54, right = 880;
+    const x = Math.min(right, Math.max(left, (clientX - box.left) / box.width * 900));
+    const ratio = (x - left) / (right - left);
+    const anchor = state.xMin + (state.xMax - state.xMin) * ratio;
+    const nextSpan = Math.max(0.5, Math.min(fullMax - fullMin || 1, (state.xMax - state.xMin) * factor));
+    state.xMin = Math.max(fullMin, anchor - nextSpan * ratio);
+    state.xMax = Math.min(fullMax, state.xMin + nextSpan);
+    state.xMin = Math.max(fullMin, state.xMax - nextSpan);
+    renderPlot(plot);
+  }}
+  function panBy(deltaPixels) {{
+    const state = plotState.get(plot);
+    const box = svg.getBoundingClientRect();
+    const span = state.xMax - state.xMin;
+    const deltaTime = deltaPixels / Math.max(1, box.width) * span;
+    state.xMin = Math.max(fullMin, Math.min(fullMax - span, state.xMin + deltaTime));
+    state.xMax = state.xMin + span;
+    renderPlot(plot);
+  }}
   plotState.set(plot, {{ xMin: fullMin, xMax: fullMax }});
   plot.querySelector(".plot-zoom-in").addEventListener("click", () => {{
     const state = plotState.get(plot);
@@ -762,6 +978,31 @@ function initPlot(plot) {{
   plot.querySelector(".plot-reset").addEventListener("click", () => {{
     plotState.set(plot, {{ xMin: fullMin, xMax: fullMax }});
     renderPlot(plot);
+  }});
+  svg.addEventListener("wheel", event => {{
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 0.82 : 1.22;
+    zoomAt(event.clientX, factor);
+  }}, {{ passive: false }});
+  svg.addEventListener("pointerdown", event => {{
+    panStart = event.clientX;
+    plot.classList.add("panning");
+    svg.setPointerCapture(event.pointerId);
+  }});
+  svg.addEventListener("pointermove", event => {{
+    if (panStart === null) return;
+    const delta = panStart - event.clientX;
+    panStart = event.clientX;
+    panBy(delta);
+  }});
+  svg.addEventListener("pointerup", event => {{
+    panStart = null;
+    plot.classList.remove("panning");
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+  }});
+  svg.addEventListener("pointercancel", () => {{
+    panStart = null;
+    plot.classList.remove("panning");
   }});
   renderPlot(plot);
 }}
@@ -1158,77 +1399,88 @@ function initDataExplorer(moduleNode) {{
   renderRows();
 }}
 
+function initSimpleTableFilter(moduleNode, inputSelector, tableSelector) {{
+  const input = moduleNode.querySelector(inputSelector);
+  const rows = [...moduleNode.querySelectorAll(tableSelector + " tbody tr")];
+  if (!input || !rows.length || input.dataset.ready) return;
+  input.dataset.ready = "true";
+  input.addEventListener("input", () => {{
+    const query = input.value.trim().toLowerCase();
+    rows.forEach(row => {{
+      row.hidden = query && !row.textContent.toLowerCase().includes(query);
+    }});
+  }});
+}}
+
+function initCustomGraphBuilder(moduleNode) {{
+  const builder = moduleNode.querySelector(".custom-graph-builder");
+  if (!builder || builder.dataset.ready) return;
+  builder.dataset.ready = "true";
+  const ySelect = builder.querySelector(".graph-y");
+  const list = builder.querySelector(".custom-plot-list");
+  function addPlot(field) {{
+    if (!field) return;
+    const plot = document.createElement("div");
+    plot.innerHTML = `<div class="plot" data-field="${{field}}" data-unit="" data-color="#1769c2">
+      <div class="plot-head"><span>${{field}}</span><span></span></div>
+      <div class="plot-tools">
+        <button class="ghost plot-zoom-in" type="button">Zoom in</button>
+        <button class="ghost plot-zoom-out" type="button">Zoom out</button>
+        <button class="ghost plot-reset" type="button">Reset</button>
+        <span class="muted plot-readout">Hover plot for time and value</span>
+      </div>
+      <svg viewBox="0 0 900 180" role="img" aria-label="${{field}} custom plot">
+        <g class="plot-grid"></g>
+        <g class="plot-labels"></g>
+        <line x1="54" y1="150" x2="880" y2="150" class="axis"/>
+        <line x1="54" y1="16" x2="54" y2="150" class="axis"/>
+        <polyline points="" stroke="#1769c2"/>
+        <circle class="plot-cursor" r="4" hidden></circle>
+      </svg>
+    </div>`;
+    const node = plot.firstElementChild;
+    list.appendChild(node);
+    initPlot(node);
+  }}
+  builder.querySelector(".graph-add").addEventListener("click", () => addPlot(ySelect.value));
+  builder.querySelector(".graph-clear").addEventListener("click", () => {{ list.innerHTML = ""; }});
+  addPlot(ySelect.value || "relative_altitude_m");
+}}
+
 function createModule(id) {{
   const template = document.getElementById(`template-${{id}}`);
   if (!template) return null;
   const node = template.content.firstElementChild.cloneNode(true);
-  node.querySelector(".remove-module").addEventListener("click", () => {{
-    node.remove();
-    saveLayout();
-  }});
-  node.addEventListener("dragstart", event => {{
-    draggedModule = node;
-    node.classList.add("dragging");
-    event.dataTransfer.setData("text/plain", id);
-  }});
-  node.addEventListener("dragend", () => {{
-    node.classList.remove("dragging");
-    draggedModule = null;
-    saveLayout();
-  }});
   if (id === "data") initDataExplorer(node);
+  if (id === "parameters") initSimpleTableFilter(node, ".parameter-search", ".parameter-table");
+  if (id === "messages") initSimpleTableFilter(node, ".message-search", ".message-table");
+  if (id === "custom-graphs") initCustomGraphBuilder(node);
   initPlots(node);
   if (id === "map") initRouteMaps(node);
   return node;
 }}
 
-function addModule(id) {{
+function showModule(id) {{
   const node = createModule(id);
   if (!node) return;
+  workspace.innerHTML = "";
   workspace.appendChild(node);
-  saveLayout();
+  localStorage.setItem(storageKey, JSON.stringify([id]));
+  document.querySelectorAll(".library-item").forEach(item => item.classList.toggle("active", item.dataset.module === id));
 }}
 
 function loadLayout() {{
-  workspace.innerHTML = "";
   const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
-  const modules = Array.isArray(saved) && saved.length ? saved : defaultModules;
-  modules.forEach(id => {{
-    const node = createModule(id);
-    if (node) workspace.appendChild(node);
-  }});
+  const id = Array.isArray(saved) && saved.length ? saved[0] : defaultModules[0];
+  showModule(id || "home");
 }}
-
-function saveLayout() {{
-  const ids = [...workspace.querySelectorAll(".module")].map(node => node.dataset.module);
-  localStorage.setItem(storageKey, JSON.stringify(ids));
-}}
-
-workspace.addEventListener("dragover", event => {{
-  event.preventDefault();
-  workspace.classList.add("drop-target");
-  const after = [...workspace.querySelectorAll(".module:not(.dragging)")].find(child => {{
-    const box = child.getBoundingClientRect();
-    return event.clientY < box.top + box.height / 2;
-  }});
-  if (draggedModule) workspace.insertBefore(draggedModule, after || null);
-}});
-workspace.addEventListener("dragleave", () => workspace.classList.remove("drop-target"));
-workspace.addEventListener("drop", event => {{
-  event.preventDefault();
-  workspace.classList.remove("drop-target");
-  const id = event.dataTransfer.getData("text/plain");
-  if (!draggedModule && id) addModule(id);
-  saveLayout();
-}});
 
 document.querySelectorAll(".library-item").forEach(item => {{
-  item.addEventListener("click", () => addModule(item.dataset.module));
-  item.addEventListener("dragstart", event => event.dataTransfer.setData("text/plain", item.dataset.module));
+  item.addEventListener("click", () => showModule(item.dataset.module));
 }});
 document.getElementById("resetLayout").addEventListener("click", () => {{
   localStorage.removeItem(storageKey);
-  loadLayout();
+  showModule("home");
 }});
 document.getElementById("themeToggle").addEventListener("click", () => {{
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";

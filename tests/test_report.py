@@ -24,6 +24,25 @@ class ReportTests(unittest.TestCase):
         self.assertIn("plot-zoom-in", document)
         self.assertIn("plot-zoom-out", document)
         self.assertIn("plot-readout", document)
+        self.assertIn('svg.addEventListener("wheel"', document)
+        self.assertIn('svg.addEventListener("pointerdown"', document)
+
+    def test_report_includes_professional_review_modules(self):
+        samples = generate_flight(duration_s=80)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = Path(temp_dir) / "report.html"
+            write_html_report(report, samples, analyze(samples), generate_insights(samples))
+            document = report.read_text(encoding="utf-8")
+
+        self.assertIn("Home", document)
+        self.assertIn("Parameters", document)
+        self.assertIn("Timestamped Messages", document)
+        self.assertIn("RCIN / Manual Inputs", document)
+        self.assertIn("RCOUT / Actuator Outputs", document)
+        self.assertIn("Custom Graph Builder", document)
+        self.assertIn("PID Review", document)
+        self.assertIn("AI Report", document)
+        self.assertIn("showModule", document)
 
     def test_report_includes_2d_and_cesium_route_maps(self):
         samples = generate_flight(duration_s=80)
