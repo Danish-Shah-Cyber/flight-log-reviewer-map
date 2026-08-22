@@ -71,6 +71,8 @@ class ReportTests(unittest.TestCase):
         self.assertIn('L.polyline(points, { color: "#111827"', document)
         self.assertIn("routeColorForMode(mode)", document)
         self.assertIn("Mode segment:", document)
+        self.assertIn("PolylineOutlineMaterialProperty", document)
+        self.assertIn("Mode label:", document)
         self.assertIn("Drone route hit path", document)
         self.assertIn("altitudeScale", document)
         self.assertIn("viewer.camera.setView", document)

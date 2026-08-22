@@ -1510,16 +1510,30 @@ function initCesiumRoute(moduleNode) {{
     const nextMode = point.mode || "Unknown";
     cesiumSegment.push(positions[index + 1]);
     if (nextMode !== cesiumMode || index === routeSamples.length - 2) {{
+      const labelPosition = cesiumSegment[Math.floor(cesiumSegment.length / 2)];
       viewer.entities.add({{
         name: "Mode segment: " + cesiumMode,
         polyline: {{
           positions: cesiumSegment.slice(),
-          width: 8,
-          material: new Cesium.PolylineGlowMaterialProperty({{
-            glowPower: 0.22,
-            color: Cesium.Color.fromCssColorString(routeColorForMode(cesiumMode))
+          width: 10,
+          material: new Cesium.PolylineOutlineMaterialProperty({{
+            color: Cesium.Color.fromCssColorString(routeColorForMode(cesiumMode)),
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.95),
+            outlineWidth: 2
           }}),
           clampToGround: false
+        }}
+      }});
+      viewer.entities.add({{
+        name: "Mode label: " + cesiumMode,
+        position: labelPosition,
+        label: {{
+          text: cesiumMode,
+          font: "700 12px sans-serif",
+          showBackground: true,
+          backgroundColor: Cesium.Color.BLACK.withAlpha(0.62),
+          fillColor: Cesium.Color.WHITE,
+          pixelOffset: new Cesium.Cartesian2(0, 18)
         }}
       }});
       cesiumSegment = [positions[index + 1]];
