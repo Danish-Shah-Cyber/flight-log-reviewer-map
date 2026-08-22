@@ -69,6 +69,11 @@ class ReportTests(unittest.TestCase):
         self.assertIn('L.polyline(points, { color: "#19b7ff"', document)
         self.assertIn("altitudeScale", document)
         self.assertIn("viewer.camera.setView", document)
+        self.assertIn("routeWaypointIndexes", document)
+        self.assertIn("waypoint-marker", document)
+        self.assertIn('hitLine.on("mousemove"', document)
+        self.assertIn("homeButton: false", document)
+        self.assertIn("sceneModePicker: false", document)
 
     def test_report_notes_downsampled_display(self):
         samples = generate_flight(duration_s=12100)

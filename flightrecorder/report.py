@@ -811,7 +811,9 @@ polyline {{ fill: none; stroke-width: 3; stroke-linejoin: round; }}
 .route-view.map-failed .map-empty {{ display: block; }}
 .leaflet-popup-content {{ color: #18202b; min-width: 210px; }}
 .leaflet-popup-content strong {{ display: block; margin-bottom: 4px; }}
+.waypoint-marker {{ width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #ffffff; color: #111827; border: 3px solid #1769c2; box-shadow: 0 2px 8px rgba(17, 24, 39, .28); font: 800 12px/1 Segoe UI, Arial, sans-serif; }}
 .cesium-route-map .cesium-widget-credits {{ display: none !important; }}
+.cesium-route-map .cesium-viewer-toolbar, .cesium-route-map .cesium-viewer-animationContainer, .cesium-route-map .cesium-viewer-timelineContainer, .cesium-route-map .cesium-viewer-fullscreenContainer {{ display: none !important; }}
 .route-map text {{ fill: var(--text); font-size: 14px; font-weight: 700; }}
 .map-bg {{ fill: var(--panel-2); stroke: none; }}
 .grid-lines line {{ stroke: var(--line); stroke-width: 1; }}
@@ -1111,6 +1113,15 @@ function routeColorForMode(mode) {{
   return palette[Math.max(0, modes.indexOf(mode || "Unknown")) % palette.length];
 }}
 
+function routeWaypointIndexes(maxWaypoints = 24) {{
+  if (!routeSamples.length) return [];
+  const step = Math.max(1, Math.ceil(routeSamples.length / maxWaypoints));
+  const indexes = [];
+  for (let index = 0; index < routeSamples.length; index += step) indexes.push(index);
+  if (indexes[indexes.length - 1] !== routeSamples.length - 1) indexes.push(routeSamples.length - 1);
+  return indexes;
+}}
+
 function loadScriptWithFallback(name, sources, isReady) {{
   if (isReady()) return Promise.resolve(true);
   if (window[name + "Loading"]) return window[name + "Loading"];
@@ -1276,6 +1287,24 @@ function drawRouteCanvas(canvas, mode = "2d") {{
   context.arc(last.x, last.y, 7, 0, Math.PI * 2);
   context.fill();
   context.fillText("End", last.x + 10, last.y - 10);
+  routeWaypointIndexes(mode === "3d" ? 20 : 24).forEach((index, sequence) => {{
+    const waypoint = projected[index];
+    if (!waypoint) return;
+    context.beginPath();
+    context.fillStyle = "#ffffff";
+    context.strokeStyle = "#1769c2";
+    context.lineWidth = 3;
+    context.arc(waypoint.x, waypoint.y, 12, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+    context.fillStyle = "#111827";
+    context.font = "800 11px Segoe UI, Arial";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(String(sequence + 1), waypoint.x, waypoint.y);
+  }});
+  context.textAlign = "start";
+  context.textBaseline = "alphabetic";
   return projected;
 }}
 
@@ -1309,7 +1338,11 @@ function initCanvasRoute(moduleNode, selector, mode) {{
         nearest = item;
       }}
     }});
-    if (nearest && inspector) inspector.textContent = routeInspectorText(nearest.point);
+    if (nearest && inspector && best <= 18 * 18) {{
+      inspector.textContent = routeInspectorText(nearest.point);
+    }} else if (inspector) {{
+      inspector.textContent = mode === "3d" ? "Hover the 3D route for time, mode, speed, altitude, and location." : "Hover the route for time, mode, speed, altitude, and location.";
+    }}
   }});
   window.addEventListener("resize", () => {{ projected = drawRouteCanvas(canvas, mode); }});
 }}
@@ -1322,6 +1355,7 @@ function initLeafletRoute(moduleNode) {{
     return;
   }}
   const points = routeSamples.map(point => [Number(point.latitude_deg), Number(point.longitude_deg)]);
+  const inspector = panel.querySelector(".route-inspector");
   const map = L.map(container, {{ scrollWheelZoom: true, preferCanvas: true }});
   L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
     attribution: "&copy; OpenStreetMap contributors",
@@ -1351,13 +1385,34 @@ function initLeafletRoute(moduleNode) {{
       fillOpacity: 0.95
     }}).addTo(map);
   }});
+  routeWaypointIndexes(24).forEach((index, sequence) => {{
+    const point = routeSamples[index];
+    L.marker([Number(point.latitude_deg), Number(point.longitude_deg)], {{
+      icon: L.divIcon({{
+        className: "",
+        html: `<span class="waypoint-marker">${{sequence + 1}}</span>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      }}),
+      keyboard: false
+    }}).addTo(map).bindPopup("Waypoint " + (sequence + 1) + "<br>" + routePopupHtml(point));
+  }});
   const hoverMarker = L.circleMarker(points[0], {{ radius: 6, color: "#ffffff", weight: 2, fillColor: "#1769c2", fillOpacity: 1 }}).addTo(map);
-  map.on("mousemove", event => {{
+  hoverMarker.setStyle({{ opacity: 0, fillOpacity: 0 }});
+  const hitLine = L.polyline(points, {{ color: "#000000", weight: 26, opacity: 0.01, interactive: true }}).addTo(map);
+  hitLine.on("mousemove", event => {{
     const point = nearestRoutePoint(event.latlng.lat, event.latlng.lng);
     if (!point) return;
     const latlng = [Number(point.latitude_deg), Number(point.longitude_deg)];
     hoverMarker.setLatLng(latlng);
+    hoverMarker.setStyle({{ opacity: 1, fillOpacity: 1 }});
     hoverMarker.bindTooltip(routePopupHtml(point), {{ sticky: true, direction: "top", opacity: 0.96 }}).openTooltip();
+    if (inspector) inspector.textContent = routeInspectorText(point);
+  }});
+  hitLine.on("mouseout", () => {{
+    hoverMarker.closeTooltip();
+    hoverMarker.setStyle({{ opacity: 0, fillOpacity: 0 }});
+    if (inspector) inspector.textContent = "Hover the route for time, mode, speed, altitude, and location.";
   }});
   L.marker(points[0]).addTo(map).bindPopup("Start<br>" + routePopupHtml(routeSamples[0]));
   L.marker(points[points.length - 1]).addTo(map).bindPopup("End<br>" + routePopupHtml(routeSamples[routeSamples.length - 1]));
@@ -1380,9 +1435,9 @@ function initCesiumRoute(moduleNode) {{
     baseLayerPicker: false,
     fullscreenButton: false,
     geocoder: false,
-    homeButton: true,
+    homeButton: false,
     infoBox: false,
-    sceneModePicker: true,
+    sceneModePicker: false,
     selectionIndicator: false,
     timeline: false,
     navigationHelpButton: false,
@@ -1457,15 +1512,38 @@ function initCesiumRoute(moduleNode) {{
     name: "Point details",
     position: positions[0],
     point: {{ pixelSize: 10, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 }},
-    label: {{ text: "", font: "13px sans-serif", showBackground: true, backgroundColor: Cesium.Color.BLACK.withAlpha(0.72), pixelOffset: new Cesium.Cartesian2(0, -32), fillColor: Cesium.Color.WHITE }}
+    label: {{ text: "", font: "13px sans-serif", showBackground: true, backgroundColor: Cesium.Color.BLACK.withAlpha(0.72), pixelOffset: new Cesium.Cartesian2(0, -32), fillColor: Cesium.Color.WHITE }},
+    show: false
+  }});
+  routeWaypointIndexes(20).forEach((index, sequence) => {{
+    const point = routeSamples[index];
+    viewer.entities.add({{
+      name: "Waypoint " + (sequence + 1),
+      position: Cesium.Cartesian3.fromDegrees(Number(point.longitude_deg), Number(point.latitude_deg), Math.max(2, (Number(point.relative_altitude_m) || 1) * altitudeScale)),
+      point: {{ pixelSize: 10, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.fromCssColorString("#1769c2"), outlineWidth: 3 }},
+      label: {{
+        text: String(sequence + 1),
+        font: "700 13px sans-serif",
+        showBackground: true,
+        backgroundColor: Cesium.Color.WHITE.withAlpha(0.92),
+        fillColor: Cesium.Color.BLACK,
+        pixelOffset: new Cesium.Cartesian2(0, -22)
+      }}
+    }});
   }});
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
   handler.setInputAction(movement => {{
+    const picked = viewer.scene.pick(movement.endPosition);
+    if (!picked || !picked.id || !["Drone route", "Route ground shadow"].includes(picked.id.name)) {{
+      hoverEntity.show = false;
+      return;
+    }}
     const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, viewer.scene.globe.ellipsoid);
     if (!cartesian) return;
     const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
     const point = nearestRoutePoint(Cesium.Math.toDegrees(cartographic.latitude), Cesium.Math.toDegrees(cartographic.longitude));
     if (!point) return;
+    hoverEntity.show = true;
     hoverEntity.position = Cesium.Cartesian3.fromDegrees(Number(point.longitude_deg), Number(point.latitude_deg), Math.max(2, (Number(point.relative_altitude_m) || 1) * altitudeScale));
     hoverEntity.label.text = formatTime(point.time_s) + "\\n" +
       "Mode: " + (point.mode || "Unknown") + "\\n" +
